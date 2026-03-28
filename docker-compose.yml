@@ -1,0 +1,84 @@
+# ZeroClaw camera security agent
+#
+# Setup:
+#   cp .env.example .env      # fill in API_KEY and CAMERA_PASSWORD
+#   docker compose build
+#   docker compose up -d
+#
+# Send a message to the agent:
+#   docker compose exec zeroclaw zeroclaw agent -m "camera status?"
+#
+# Tail alarm events:
+#   docker compose logs -f
+#
+# Gateway API: http://localhost:42617
+
+services:
+  zeroclaw:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: zeroclaw-camera:latest
+    container_name: zeroclaw-camera
+    restart: unless-stopped
+
+    environment:
+      # LLM provider (required)
+      - API_KEY=${API_KEY}
+      - PROVIDER=${PROVIDER:-anthropic}
+      # Model override — comment out to use provider default
+      - ZEROCLAW_MODEL=${ZEROCLAW_MODEL:-claude-sonnet-4-6}
+
+      # Camera — written to camera_config.ini at startup by entrypoint.sh
+      - CAMERA_IP=${CAMERA_IP:-192.168.0.100}
+      - CAMERA_PORT=${CAMERA_PORT:-80}
+      - CAMERA_USERNAME=${CAMERA_USERNAME:-admin}
+      - CAMERA_PASSWORD=${CAMERA_PASSWORD:-admin}
+
+    volumes:
+      # All zeroclaw state: config, memory, workspace (SOUL.md + skill), uv cache
+      - zeroclaw-data:/zeroclaw-data
+      # Alarm images — separate volume for retention management and backup
+      # Matches the default --output-dir in SOUL.md alarm response protocol
+      - alarm-images:/tmp/alarms
+
+    ports:
+      # Gateway API — remove if switching to network_mode: host (see below)
+      - "127.0.0.1:42617:42617"
+
+    # ── Camera network access ─────────────────────────────────────────────────
+    # The container must be able to reach the camera IP (default 192.168.0.100).
+    #
+    # Bridge (default): works when the Docker host can already route to that IP.
+    #
+    # If the camera is only reachable via a local interface (e.g. a dedicated
+    # camera VLAN, or on a host with multiple NICs), use host networking instead:
+    #   1. Uncomment the line below
+    #   2. Remove the entire "ports:" block above (not valid with host mode)
+    #
+    # network_mode: host
+
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:42617/health"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 64M
+
+volumes:
+  # Named volume: Docker initialises contents from the image on first run,
+  # then persists them across container restarts and rebuilds.
+  # After a rebuild, re-run "docker compose up -d --force-recreate" only if
+  # you need to pick up new skill code or SOUL.md changes (which get baked
+  # into the image but are shadowed by the existing volume on subsequent runs).
+  zeroclaw-data:
+  alarm-images:

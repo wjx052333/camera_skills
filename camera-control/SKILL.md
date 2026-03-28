@@ -14,54 +14,54 @@ Control the SSAU IP camera via CGI HTTP API. Config is read from `camera_config.
 Run the script with the appropriate subcommand:
 
 ```bash
-/home/ubuntu/agent_eyes/bot/venv/bin/python3 scripts/camera.py --help
+venv/bin/python3 scripts/camera.py --help
 ```
 
 ### PTZ movement
 
 ```bash
 # Move: direction = up | down | left | right | home | stop
-/home/ubuntu/agent_eyes/bot/venv/bin/python3 scripts/camera.py ptz --act <direction> [--speed 1-63]
+venv/bin/python3 scripts/camera.py ptz --act <direction> [--speed 1-63]
 
 # Zoom: in | out
-/home/ubuntu/agent_eyes/bot/venv/bin/python3 scripts/camera.py ptz --act zoomin
-/home/ubuntu/agent_eyes/bot/venv/bin/python3 scripts/camera.py ptz --act zoomout
+venv/bin/python3 scripts/camera.py ptz --act zoomin
+venv/bin/python3 scripts/camera.py ptz --act zoomout
 
 # Stop movement
-/home/ubuntu/agent_eyes/bot/venv/bin/python3 scripts/camera.py ptz --act stop
+venv/bin/python3 scripts/camera.py ptz --act stop
 ```
 
 ### Presets
 
 ```bash
 # Save current position as preset N
-/home/ubuntu/agent_eyes/bot/venv/bin/python3 scripts/camera.py preset --act set --number <N>
+venv/bin/python3 scripts/camera.py preset --act set --number <N>
 
 # Go to preset N
-/home/ubuntu/agent_eyes/bot/venv/bin/python3 scripts/camera.py preset --act goto --number <N>
+venv/bin/python3 scripts/camera.py preset --act goto --number <N>
 ```
 
 ### Snapshot
 
 ```bash
 # Save snapshot to file (default: snapshot.jpg)
-/home/ubuntu/agent_eyes/bot/venv/bin/python3 scripts/camera.py snapshot [--output <path>]
+venv/bin/python3 scripts/camera.py snapshot [--output <path>]
 ```
 
 ### Image settings
 
 ```bash
 # Get current image settings
-/home/ubuntu/agent_eyes/bot/venv/bin/python3 scripts/camera.py image --get
+venv/bin/python3 scripts/camera.py image --get
 
 # Set image params (all optional, only pass what you want to change)
-/home/ubuntu/agent_eyes/bot/venv/bin/python3 scripts/camera.py image \
+venv/bin/python3 scripts/camera.py image \
   [--brightness 0-100] [--contrast 0-100] [--saturation 0-100] \
   [--flip on|off] [--mirror on|off] [--noise 0-100] \
   [--aemode 0-22] [--imgmode 0|1]
 
 # Infrared / IR cut
-/home/ubuntu/agent_eyes/bot/venv/bin/python3 scripts/camera.py infrared --status auto|open|close
+venv/bin/python3 scripts/camera.py infrared --status auto|open|close
 ```
 
 ### Motion alarm — active query (one-shot)
@@ -70,16 +70,16 @@ Compares `alarmsnap.jpg` ETag against stored baseline. Returns `triggered: true`
 
 ```bash
 # First call: records baseline (triggered: false)
-/home/ubuntu/agent_eyes/bot/venv/bin/python3 scripts/camera.py alarm
+venv/bin/python3 scripts/camera.py alarm
 
 # Subsequent calls: triggered: true if new motion, false if not
-/home/ubuntu/agent_eyes/bot/venv/bin/python3 scripts/camera.py alarm
+venv/bin/python3 scripts/camera.py alarm
 
 # Save the alarm image when triggered
-/home/ubuntu/agent_eyes/bot/venv/bin/python3 scripts/camera.py alarm --save [--output-dir /tmp]
+venv/bin/python3 scripts/camera.py alarm --save [--output-dir /tmp]
 
 # Reset baseline (next call will re-baseline)
-/home/ubuntu/agent_eyes/bot/venv/bin/python3 scripts/camera.py alarm --reset
+venv/bin/python3 scripts/camera.py alarm --reset
 ```
 
 ### Motion alarm — background watch (async polling)
@@ -88,13 +88,13 @@ Runs indefinitely, emitting a JSON line to stdout for each event. Each new alarm
 
 ```bash
 # Poll every 2 seconds (default), save snapshots to current dir
-/home/ubuntu/agent_eyes/bot/venv/bin/python3 scripts/camera.py watch
+venv/bin/python3 scripts/camera.py watch
 
 # Custom interval and output dir
-/home/ubuntu/agent_eyes/bot/venv/bin/python3 scripts/camera.py watch --interval 5 --output-dir /tmp/alarms
+venv/bin/python3 scripts/camera.py watch --interval 5 --output-dir /tmp/alarms
 
 # Only emit events, do not save images
-/home/ubuntu/agent_eyes/bot/venv/bin/python3 scripts/camera.py watch --no-save
+venv/bin/python3 scripts/camera.py watch --no-save
 ```
 
 Event output format (one JSON per line):
@@ -108,11 +108,11 @@ Event output format (one JSON per line):
 
 ```bash
 # Camera model, firmware, SD card status, uptime
-/home/ubuntu/agent_eyes/bot/venv/bin/python3 scripts/camera.py info
+venv/bin/python3 scripts/camera.py info
 
 # Video mode and encoding params
-/home/ubuntu/agent_eyes/bot/venv/bin/python3 scripts/camera.py video --get
-/home/ubuntu/agent_eyes/bot/venv/bin/python3 scripts/camera.py venc --channel 11|12|13
+venv/bin/python3 scripts/camera.py video --get
+venv/bin/python3 scripts/camera.py venc --channel 11|12|13
 ```
 
 ## Output format
