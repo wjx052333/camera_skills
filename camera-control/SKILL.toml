@@ -1,0 +1,124 @@
+[skill]
+name        = "camera-control"
+version     = "1.0.0"
+description = """
+Control an SSAU IP camera (hi3510 CGI API).
+Use when asked to: move/pan/tilt/zoom the camera, take a photo or snapshot,
+adjust brightness/contrast/flip/mirror/IR, check for motion, or query camera status.
+All tools output JSON. Connection settings are in scripts/camera_config.ini.
+"""
+tags = ["camera", "iot", "vision", "hardware"]
+
+# ── Prompts (instructions injected into the system prompt) ────────
+
+prompts = ["""
+## Camera skill usage notes
+
+- Camera IP / credentials → edit `skills/camera-control/scripts/camera_config.ini`
+- All tools return `{"ok": true, "result": ...}` on success or `{"ok": false, "error": "..."}` on failure
+- PTZ stop: call `camera_ptz` with act=stop before issuing a new direction
+- Motion alarm: first call to `camera_alarm` records a baseline (triggered=false);
+  subsequent calls return triggered=true only when a new alarm has fired
+- `camera_image_set` flags example: `--brightness 60 --contrast 50 --flip on --mirror off`
+- IR modes: auto (sensor-driven), open (always on), close (always off)
+"""]
+
+# ── Tools ─────────────────────────────────────────────────────────
+
+[[tools]]
+name        = "camera_info"
+description = "Get camera system information: model, firmware version, uptime, SD card status."
+kind        = "shell"
+command     = "uv run skills/camera-control/scripts/camera.py info"
+
+# ──────────────────────────────────────────────────────────────────
+
+[[tools]]
+name        = "camera_snap"
+description = "Capture a JPEG snapshot from the camera and save it to disk. Returns the saved path and file size."
+kind        = "shell"
+command     = "uv run skills/camera-control/scripts/camera.py snapshot --output {{output}}"
+
+[tools.args]
+output = "Destination file path, e.g. /tmp/snapshot.jpg or ~/cam.jpg"
+
+# ──────────────────────────────────────────────────────────────────
+
+[[tools]]
+name        = "camera_ptz"
+description = """Pan, tilt, or zoom the camera.
+Actions: up, down, left, right, home, stop, zoomin, zoomout, focusin, focusout, hscan, vscan.
+Always call with act=stop to halt continuous movement."""
+kind        = "shell"
+command     = "uv run skills/camera-control/scripts/camera.py ptz --act {{act}} --speed {{speed}}"
+
+[tools.args]
+act   = "PTZ action: up | down | left | right | home | stop | zoomin | zoomout | focusin | focusout | hscan | vscan"
+speed = "Movement speed 1–63. Use 45 as default unless the user specifies otherwise."
+
+# ──────────────────────────────────────────────────────────────────
+
+[[tools]]
+name        = "camera_preset"
+description = "Save the current PTZ position as a numbered preset, or move to a saved preset."
+kind        = "shell"
+command     = "uv run skills/camera-control/scripts/camera.py preset --act {{act}} --number {{number}}"
+
+[tools.args]
+act    = "Action: 'set' to save current position, 'goto' to recall a saved preset"
+number = "Preset number (integer, e.g. 1)"
+
+# ──────────────────────────────────────────────────────────────────
+
+[[tools]]
+name        = "camera_image_get"
+description = "Read current image settings: brightness, contrast, saturation, sharpness, hue, flip, mirror, noise reduction, AE mode."
+kind        = "shell"
+command     = "uv run skills/camera-control/scripts/camera.py image --get"
+
+# ──────────────────────────────────────────────────────────────────
+
+[[tools]]
+name        = "camera_image_set"
+description = """Adjust camera image parameters. Call camera_image_get first to see current values.
+Supported flags: --brightness 0-100, --contrast 0-100, --saturation 0-100,
+--sharpness 0-100, --hue 0-100, --flip on|off, --mirror on|off, --noise 0-100,
+--aemode 0-22, --imgmode 0|1. Pass only the flags you want to change."""
+kind        = "shell"
+command     = "uv run skills/camera-control/scripts/camera.py image {{flags}}"
+
+[tools.args]
+flags = "Space-separated CLI flags, e.g. '--brightness 60 --flip on --mirror off'"
+
+# ──────────────────────────────────────────────────────────────────
+
+[[tools]]
+name        = "camera_ir_get"
+description = "Read the current infrared / night-vision mode of the camera."
+kind        = "shell"
+command     = "uv run skills/camera-control/scripts/camera.py infrared --get"
+
+# ──────────────────────────────────────────────────────────────────
+
+[[tools]]
+name        = "camera_ir_set"
+description = "Set the camera infrared / night-vision mode."
+kind        = "shell"
+command     = "uv run skills/camera-control/scripts/camera.py infrared --status {{mode}}"
+
+[tools.args]
+mode = "IR mode: 'auto' (sensor-driven), 'open' (always on), 'close' (always off)"
+
+# ──────────────────────────────────────────────────────────────────
+
+[[tools]]
+name        = "camera_alarm"
+description = """Check whether the camera has detected motion since the last call.
+First call records a baseline (triggered=false). Subsequent calls return triggered=true
+only when a new alarm image has appeared.
+Optional flags: --save --output-dir /tmp/alarms (save image on trigger), --reset (clear baseline)."""
+kind        = "shell"
+command     = "uv run skills/camera-control/scripts/camera.py alarm {{flags}}"
+
+[tools.args]
+flags = "Optional flags: empty string for basic check, '--save --output-dir /tmp' to capture image, '--reset' to clear baseline"
