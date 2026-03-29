@@ -1,3 +1,4 @@
 camera-control/scripts/.alarm_state.json
 *.doc
 *.tar.gz
+**/__pycache__
