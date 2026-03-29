@@ -199,6 +199,40 @@ PTZ状态:
 
 ---
 
+### ⚠️ PTZ 异步等待规范（所有 PTZ 操作的强制要求）
+
+**PTZ 指令在 API 层面立即返回，但摄像头仍在物理移动中。**
+在等待时间结束之前，绝对不得执行任何依赖摄像头位置的操作（拍照、基线对比、场景分析等）。
+**每一步 PTZ 动作都必须当作异步任务：发出指令 → 严格等满规定时长 → 才能进行下一步。**
+
+#### 各类 PTZ 动作的必要等待时间
+
+| 动作 | 操作序列 | 等待时长 | 说明 |
+|---|---|---|---|
+| 方向移动（left/right/up/down） | 发 `act=<dir>` → 等 N 秒 → 发 `act=stop` → **等 `ptz_settle_secs`（默认 2s）** | stop 后再等 2s | stop 发出后摄像头仍有惯性，需等完全静止 |
+| home 归位 | 发 `act=home` → **严格等 `home_settle_secs`（默认 60s）** | **≥ 60 秒** | home 是物理全程移动，耗时最长；60s 是最低保障，距离越远越慢 |
+| preset goto | 发 `act=goto` → **等 `home_settle_secs`** | **≥ 60 秒** | 与 home 同理，物理移动距离不可预知 |
+| zoom in/out | 发 `act=zoomin/zoomout` → 等 N 秒 → 发 `act=stop` → 等 1s | stop 后再等 1s | 变焦稳定比平移快 |
+
+> **home 是延迟最大的操作**。任何包含 `ptz home` 或 `preset goto` 的流程，
+> 在等待期间应切换去做其他不依赖摄像头位置的工作（写日志、分析已有图像、更新状态等），
+> 等待时间到了再继续下一步——不得提前操作，也不得跳过等待。
+
+#### 正确的 home 归位模式（示例）
+
+```
+# ❌ 错误：发完 home 立即拍照
+camera_ptz act=home
+camera_snap → baseline.jpg   # 此时摄像头还在路上，拍到的不是 home 位置
+
+# ✓ 正确：发完 home 后严格等待 home_settle_secs
+camera_ptz act=home
+[等待 home_settle_secs = 60s，期间可做其他工作]
+camera_snap → baseline.jpg   # 现在才是真正的 home 位置
+```
+
+---
+
 ### Step 1：定位——这次报警从哪里来？
 
 ```
@@ -283,8 +317,8 @@ camera_alarm --save --output-dir /tmp/alarms
 
 跟踪结束或目标消失后：
 
-1. 执行归位方案，更新 `PTZ状态.当前位置 = origin`
-2. 等摄像头稳定（约 1 秒）
+1. 执行归位方案，更新 `PTZ状态.当前位置 = origin（归位中）`
+2. **严格等待 `home_settle_secs`（≥60 秒）**，期间可写跟踪日志、整理证据文件
 3. 拍快照与 `home_baseline.jpg` 比对：
 
 | 比对结果 | 判断 | 处置 |
@@ -399,6 +433,7 @@ camera_alarm --save --output-dir /tmp/alarms
 ## 约束与边界
 
 1. **PTZ 状态是 agent 的责任**：API 不提供位置查询，每次 PTZ 动作后立即更新状态。
+2. **所有 PTZ 操作都是异步的**：API 调用立即返回，但摄像头仍在物理移动。必须严格等满规定时长才能执行下一步。`home`/`preset goto` 最慢（≥60s），方向移动 stop 后也需等 2s 稳定。**绝不可发完指令就立刻拍照或做位置依赖的操作。**
 2. **报警图像角度 = 报警时的 PTZ 位置**：这是报警定位的唯一依据。
 3. **待机优先静止**：摄像头停在归位点，报警图像方向才可预期；频繁转动产生盲窗。
 4. **全景重建是高代价操作**：执行前必须通知用户，不静默自动执行。
