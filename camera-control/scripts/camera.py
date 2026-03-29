@@ -19,6 +19,7 @@ import argparse
 import configparser
 import json
 import sys
+import time
 from pathlib import Path
 
 try:
@@ -37,6 +38,18 @@ def load_config():
         raise FileNotFoundError(f"Config not found: {CONFIG_PATH}")
     cfg.read(CONFIG_PATH)
     return cfg["camera"]
+
+
+def load_panorama_config():
+    cfg = configparser.ConfigParser()
+    if CONFIG_PATH.exists():
+        cfg.read(CONFIG_PATH)
+    sec = cfg["panorama"] if "panorama" in cfg else {}
+    return {
+        "ptz_sweep_secs": float(sec.get("ptz_sweep_secs", 8)),
+        "ptz_settle_secs": float(sec.get("ptz_settle_secs", 2)),
+        "home_settle_secs": float(sec.get("home_settle_secs", 30)),
+    }
 
 
 class Camera:
@@ -153,6 +166,124 @@ def parse_cgi_response(text):
     return result if result else text
 
 
+def _cmd_check(cam):
+    """Run all health checks, collect results regardless of individual failures."""
+    checks = {}
+    failed = []
+
+    def step(name, fn):
+        try:
+            result = fn()
+            if isinstance(result, dict):
+                checks[name] = {"ok": True, **result}
+            else:
+                checks[name] = {"ok": True}
+        except Exception as e:
+            checks[name] = {"ok": False, "error": str(e)}
+            failed.append(name)
+
+    # 1. connectivity + server info
+    def check_info():
+        parsed = parse_cgi_response(cam.get_server_info())
+        return parsed if isinstance(parsed, dict) else {}
+    step("info", check_info)
+
+    # 2-5. PTZ four directions (brief 1s movement each)
+    PTZ_CHECK_SECS = 1.0
+    for direction in ["left", "right", "up", "down"]:
+        def check_ptz(d=direction):
+            cam.ptz_ctrl(d)
+            time.sleep(PTZ_CHECK_SECS)
+            cam.ptz_ctrl("stop")
+            return {}
+        step(f"ptz_{direction}", check_ptz)
+
+    # 6. PTZ home
+    def check_ptz_home():
+        cam.ptz_ctrl("home")
+        return {}
+    step("ptz_home", check_ptz_home)
+
+    # 7. snapshot (verify image retrieval)
+    def check_snapshot():
+        data = cam.snapshot()
+        return {"size_bytes": len(data)}
+    step("snapshot", check_snapshot)
+
+    # 8. image settings read
+    def check_image():
+        parse_cgi_response(cam.get_image_attr())
+        return {}
+    step("image", check_image)
+
+    # 9. infrared status read
+    def check_infrared():
+        parse_cgi_response(cam.get_infrared())
+        return {}
+    step("infrared", check_infrared)
+
+    # 10. alarm endpoint reachability
+    def check_alarm():
+        etag, last_modified, size = cam.alarm_head()
+        return {"etag": etag, "size_bytes": size}
+    step("alarm", check_alarm)
+
+    return {
+        "overall": "fail" if failed else "pass",
+        "failed": failed,
+        "checks": checks,
+    }
+
+
+def _cmd_panorama(cam, output_dir, pcfg):
+    """Sweep camera to 4 positions and capture a photo at each."""
+    sweep = pcfg["ptz_sweep_secs"]
+    settle = pcfg["ptz_settle_secs"]
+    home_settle = pcfg["home_settle_secs"]
+
+    out = Path(output_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    photos = {}
+
+    def snap(name):
+        data = cam.snapshot()
+        path = out / f"{name}.jpg"
+        path.write_bytes(data)
+        photos[name] = str(path.resolve())
+
+    # Left end
+    cam.ptz_ctrl("left")
+    time.sleep(sweep)
+    cam.ptz_ctrl("stop")
+    time.sleep(settle)
+    snap("left")
+
+    # Right end (from left end, sweep * 2 to cross full range)
+    cam.ptz_ctrl("right")
+    time.sleep(sweep * 2)
+    cam.ptz_ctrl("stop")
+    time.sleep(settle)
+    snap("right")
+
+    # Home position
+    cam.ptz_ctrl("home")
+    time.sleep(home_settle)
+    snap("home")
+
+    # Up end
+    cam.ptz_ctrl("up")
+    time.sleep(sweep)
+    cam.ptz_ctrl("stop")
+    time.sleep(settle)
+    snap("up")
+
+    # Return to home
+    cam.ptz_ctrl("home")
+    time.sleep(home_settle)
+
+    return {"photos": photos, "config": pcfg}
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="SSAU IP Camera control CLI",
@@ -243,6 +374,14 @@ Examples:
                    help="Directory to save alarm snapshots")
     p.add_argument("--no-save", action="store_true",
                    help="Do not save snapshots, only emit JSON events")
+
+    # check
+    sub.add_parser("check", help="Run a full health check of all camera functions and return a report")
+
+    # panorama
+    p = sub.add_parser("panorama", help="Sweep camera to 4 positions and capture a photo at each")
+    p.add_argument("--output-dir", default=".", metavar="DIR",
+                   help="Directory to save panorama photos (default: .)")
 
     args = parser.parse_args()
 
@@ -395,6 +534,13 @@ Examples:
                 _time.sleep(args.interval)
 
             print(json.dumps({"ok": True, "event": "stopped"}), flush=True)
+
+        elif args.cmd == "check":
+            ok(_cmd_check(cam))
+
+        elif args.cmd == "panorama":
+            pcfg = load_panorama_config()
+            ok(_cmd_panorama(cam, args.output_dir, pcfg))
 
     except requests.exceptions.ConnectionError:
         err(f"Cannot connect to camera at {cam.base}")

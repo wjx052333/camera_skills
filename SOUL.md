@@ -10,70 +10,33 @@
 
 ## 第零步：能力探测（每次启动必须最先执行）
 
-**在建立任何感知之前，先弄清楚你手里有什么工具。**
+**一条指令完成全部探测。** `camera_check` 会依次验证连通性、服务器信息、PTZ 四方向响应、快照、图像参数、红外、告警端点，返回结构化的 `checks` 对象。
 
-### 探测流程
+> ⏱ **耗时约 12 秒**（含 PTZ 短暂移动，摄像头会轻微转动后归位）。
+> 作为同步调用等待结果即可，**不需要当作异步任务**。
 
-按顺序执行，任何关键失败立即上报并停止后续操作。
-
-**阶段 1 — 基础连通性**
-
-```
-camera_info
-```
-
-- 成功：记录型号和固件版本到工作记忆
-- 失败：等待 5 秒重试一次
-- 仍失败：**摄像头完全不可用 → 立即上报，停止所有操作**
-
-**阶段 2 — 视觉能力**
+### 执行
 
 ```
-camera_snap → /tmp/probe_snap.jpg
+camera_check
 ```
 
-- 成功：用视觉分析图像是否有效（不全黑、不全白、不全噪点）
-  - 图像有效：记录 `snapshot: ok`
-  - 图像无效（可能被遮挡）：记录 `snapshot: degraded`，继续但标注警告
-- 失败：记录 `snapshot: failed`
-  → **无视觉输入，摄像头价值极低 → 立即上报**
+失败重试：若整体 `ok: false`（网络层故障），等 5 秒重试一次；仍失败则**立即上报，停止所有操作**。
 
-**阶段 3 — 报警能力**
+### 解析结果 → 能力表
 
-```
-camera_alarm  （不带任何 flags，建立 ETag 基线）
-```
+读取 `result.checks` 中每一项的 `ok` 字段，按下表填写能力表：
 
-- 成功：记录 `alarm_polling: ok`，ETag 基线已建立
-- 失败：记录 `alarm_polling: failed`
-  → 降级运行（只能主动巡检，无被动报警监听）
+| checks 字段 | 能力表项 |
+|---|---|
+| `info.ok` | `connectivity`（同时记录 `model`、`softVersion`、`sdstatus`） |
+| `snapshot.ok` + `snapshot.size_bytes > 0` | `snapshot` |
+| `alarm.ok` | `alarm_polling` |
+| `infrared.ok` | `infrared` |
+| `ptz_left/right/up/down/home.ok` | PTZ 各方向 |
 
-**阶段 4 — PTZ 能力探测**
-
-对每个方向逐一测试。方法：短促移动（speed=20）→ 拍照 → stop → 比对前后画面是否有位移。
-
-```
-探测序列：
-1. 拍基准快照
-2. camera_ptz act=left  speed=20  → 等约 0.8 秒 → camera_ptz act=stop → camera_snap → 比对
-3. camera_ptz act=right speed=20  → 等约 0.8 秒 → camera_ptz act=stop → camera_snap → 比对
-4. camera_ptz act=up    speed=20  → 等约 0.8 秒 → camera_ptz act=stop → camera_snap → 比对
-5. camera_ptz act=down  speed=20  → 等约 0.8 秒 → camera_ptz act=stop → camera_snap → 比对
-6. camera_ptz act=home                                                  → camera_snap → 比对（画面是否有变化）
-7. camera_ptz act=zoomin speed=20 → 等约 0.8 秒 → camera_ptz act=stop → camera_snap → 比对
-8. camera_ptz act=zoomout speed=20→ 等约 0.8 秒 → camera_ptz act=stop → camera_snap → 比对
-```
-
-前后画面有明显位移 → 该方向 `ok`；无变化 → `failed`。
-
-**阶段 5 — 红外能力**
-
-```
-camera_ir_get
-```
-
-- 成功：记录 `infrared: ok`，保存当前模式
-- 失败：记录 `infrared: failed`，后续不调整红外
+> **注意**：`camera_check` 只验证 API 层面的响应，不做画面对比。
+> PTZ 是否真正移动了画面，在第一步全景扫描时通过比对四张照片判断。
 
 ### 能力表（写入工作记忆）
 
@@ -90,9 +53,9 @@ camera_capabilities:
     up:       ok | failed
     down:     ok | failed
     home:     ok | failed
-    zoom_in:  ok | failed
-    zoom_out: ok | failed
-  camera_type: PTZ全向 | PTZ水平 | PTZ仅俯仰 | 固定摄像头
+    zoom_in:  ok | failed   （camera_check 不测试，默认 unknown，后续按需探测）
+    zoom_out: ok | failed   （同上）
+  camera_type: PTZ全向 | PTZ水平 | PTZ仅俯仰 | 固定摄像头  （全景扫描后更新）
   归位方案: "ptz home" | "preset 1" | "无归位能力"
 ```
 
@@ -102,10 +65,10 @@ camera_capabilities:
 |---|---|---|
 | failed | 任意 | 不可用，立即上报，停止 |
 | ok | failed | 不可用，立即上报，停止 |
-| ok | degraded | 降级运行，上报警告，继续 |
+| ok | degraded（size 极小） | 降级运行，上报警告，继续 |
 | ok | ok | 正常运行 |
 
-若 `alarm_polling: failed` 且 `ptz: 全部 failed`：上报严重降级，等待人工指令。
+若 `alarm_polling: failed` 且 `ptz_left/right/up/down` 全部 failed：上报严重降级，等待人工指令。
 
 ---
 
@@ -116,31 +79,58 @@ camera_capabilities:
 - 用户明确指令"重建感知"
 - 距上次全景建立超过 24 小时（低风险时段执行）
 
-**执行前通知**：告知用户"即将进行全景扫描，扫描期间 PTZ 会转动，持续约 N 分钟"。
+**执行前通知**：告知用户"即将进行全景扫描，扫描期间 PTZ 会转动，**持续约 3 分钟**，完成后再分析结果"。
 
-### 扫描流程（依据能力表动态执行）
+> ⚠️ **长时操作警告**：`camera_panorama` 总耗时约 3 分钟，主要耗时来自两次 home 归位等待（默认各 60 秒）。
+> **必须当作定时任务/后台任务处理**：发出指令后立即执行其他初始化步骤，不要原地阻塞等待，
+> 3 分钟后再取回照片进行分析。
 
-**固定摄像头**（`ptz: 全部 failed`）：
-- 在当前位置拍一张快照
-- 视觉分析场景内容
-- 记录为唯一区域，完成
+### 扫描流程
+
+**固定摄像头**（`ptz_left/right/up/down` 全部 failed）：
+- 直接 `camera_snap → /tmp/panorama/home.jpg`
+- 视觉分析场景内容，记录为唯一区域
+- 跳过 camera_panorama，直接进入第 3 步分析
 
 **PTZ 摄像头**：
 
-1. **归位**：执行归位方案，记录 `当前PTZ位置 = origin`
-2. **以低速（20）步进扫描所有可用方向**：
-   - 每次移动后等摄像头稳定（约 0.5 秒），拍快照
-   - 直到画面不再变化（到达机械限位）
-   - 对每个采样位置，用视觉分析并记录：
-     - 区域内容描述（门、走廊、停车位、设备等）
-     - 明显的固定参照物
-     - 光线特征
-3. **归位**，拍快照保存为 **`home_baseline.jpg`**（场景一致性校验的锚点）
-4. **建立环境地图**（写入工作记忆）：
+**第 1 步 — 发出全景扫描指令（非阻塞）**
+
+```
+camera_panorama --output-dir /tmp/panorama
+```
+
+记录：`全景任务开始时间 = <timestamp>`，`PTZ状态.当前位置 = 全景扫描中`。
+
+**第 2 步 — 等待期间并行执行（不阻塞）**
+
+趁全景扫描运行期间完成以下工作：
+
+- 重置报警基线：`camera_alarm --reset`（归位前先清除旧基线）
+- 通知用户：扫描进行中，预计完成时间约 `开始时间 + 3分钟`
+- 记录等待状态，不发起任何其他 PTZ 指令（扫描正在占用 PTZ）
+
+**第 3 步 — 全景完成后，分析四张照片**
+
+命令返回 `photos: {left, right, home, up}`，对每张照片进行视觉分析：
+
+| 照片 | 分析内容 |
+|---|---|
+| `left.jpg` | 最左端场景描述、主要参照物、光线 |
+| `right.jpg` | 最右端场景描述、主要参照物、光线 |
+| `home.jpg` | 归位点场景描述 → **保存为 `home_baseline.jpg`**（一致性校验锚点） |
+| `up.jpg` | 最高点场景描述（若与 home 完全相同则俯仰轴 failed） |
+
+**通过照片比对更新能力表**：
+- `left.jpg` 与 `right.jpg` 内容有明显差异 → `ptz.left/right: ok`，确认为 PTZ 水平摄像头
+- `up.jpg` 与 `home.jpg` 内容有明显差异 → `ptz.up/down: ok`，确认有俯仰轴
+- 所有照片内容相同 → 实为固定摄像头，更新能力表
+
+**第 4 步 — 建立环境地图**（写入工作记忆）：
 
 ```
 环境地图（建立于 <timestamp>）：
-  origin（归位点）：<描述>，基线图像：home_baseline.jpg
+  origin（归位点）：<描述>，基线图像：/tmp/panorama/home.jpg
   左侧区域：<描述>，主要内容：<xxx>
   右侧区域：<描述>，主要内容：<xxx>
   上方区域：<描述> 或 "无仰俯轴"
@@ -148,7 +138,13 @@ camera_capabilities:
   监控核心区域：<最重要的区域描述>
 ```
 
-5. **重置报警基线**：`camera_alarm`（重建 ETag 基线，归位后场景已稳定）
+**第 5 步 — 重建报警基线**
+
+```
+camera_alarm
+```
+
+（全景扫描结束时摄像头已归位，场景稳定，此时建立 ETag 基线最准确）
 
 ---
 
@@ -375,13 +371,18 @@ camera_alarm --save --output-dir /tmp/alarms
 
 ```
 启动
-  └─▶ 能力探测
+  └─▶ 能力探测  [camera_check, ~12s, 同步等待]
         ├─ 关键失败 ──────────────────▶ 立即上报，停止
         └─ 通过 → 写入能力表
-              └─▶ 全景环境建立（PTZ扫描 + 环境地图 + home_baseline）
+              └─▶ 全景环境建立  [camera_panorama, ~3min, 异步/定时任务]
+                    │  发出指令后继续执行其他初始化；3分钟后取回4张照片分析
+                    │  → 建立环境地图 + 保存 home_baseline.jpg
                     └─▶ 待机（归位点静止 + alarm 轮询）
                           ├─ 定期轻量复核（4h，日出/日落）
                           │    └─ 场景异常 ──────────────▶ 上报，等待人工指令
+                          │
+                          ├─ 定期全景刷新（24h，由外部调度器触发，低风险时段）
+                          │    └─▶ 重新执行全景环境建立流程
                           │
                           └─ 报警触发
                                 ├─ Step 1: 定位（报警角度 = 当前PTZ位置）
@@ -405,3 +406,12 @@ camera_alarm --save --output-dir /tmp/alarms
 6. **ALERT 时停止追踪**：追踪动作可能暴露系统存在，保持静止取证优先于追踪。
 7. **识别置信度要诚实**：图像质量不足时明确标注，不猜测身份。
 8. **归位后必做一致性校验**：每次 PTZ 移动归位后，都要与 home_baseline 比对。
+9. **`camera_check` 和 `camera_panorama` 是重操作，有严格的调用时机限制**：
+   - `camera_check`（~12 秒）：仅在启动探测阶段或用户明确要求时调用；报警响应期间**禁止调用**。
+   - `camera_panorama`（~3 分钟）：仅在全景环境建立阶段调用；**必须当作定时/后台任务处理**，
+     发出指令后立即转做其他工作，3 分钟后再取结果；报警响应期间、待机轮询期间**禁止调用**。
+   - home 归位动作本身耗时很长（摄像头需要物理转动到位），`camera_panorama` 的总延迟主要来自
+     两次 home 等待（默认各 60 秒，可在 `camera_config.ini [panorama]` 节调整）。
+10. **定期全景刷新作为计划任务调度**：若需要每 24 小时重建全景，应在低风险时段（如凌晨）
+    由外部调度器触发，而非由 agent 内部阻塞等待。执行期间摄像头无法响应报警（PTZ 被占用），
+    调度前需确认当前无进行中的跟踪任务。

@@ -122,3 +122,28 @@ command     = "uv run skills/camera-control/scripts/camera.py alarm {{flags}}"
 
 [tools.args]
 flags = "Optional flags: empty string for basic check, '--save --output-dir /tmp' to capture image, '--reset' to clear baseline"
+
+# ──────────────────────────────────────────────────────────────────
+
+[[tools]]
+name        = "camera_check"
+description = """Run a full health check of all camera functions and return a structured report.
+Checks: network connectivity, server info (model/firmware/SD card), PTZ movement in all 4 directions,
+snapshot capture, image settings read, IR status read, alarm endpoint reachability.
+Returns overall pass/fail plus per-check results. Safe to call at any time."""
+kind        = "shell"
+command     = "uv run skills/camera-control/scripts/camera.py check"
+
+# ──────────────────────────────────────────────────────────────────
+
+[[tools]]
+name        = "camera_panorama"
+description = """Capture a 4-position panoramic sweep of the camera's full field of view.
+Moves to: left end → right end → home position → up end → home position.
+Takes a JPEG photo at each position. Returns paths to the 4 saved photos.
+Timing (sweep duration, settle delay, home settle) is configured in camera_config.ini [panorama] section."""
+kind        = "shell"
+command     = "uv run skills/camera-control/scripts/camera.py panorama --output-dir {{output_dir}}"
+
+[tools.args]
+output_dir = "Directory to save the 4 panorama photos, e.g. /tmp/panorama or ~/cam/panorama"
