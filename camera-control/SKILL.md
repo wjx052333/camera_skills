@@ -1,13 +1,39 @@
 ---
 name: camera-control
-description: Control an SSAU IP camera (hi3510 CGI API) — PTZ movement, zoom, presets, snapshot capture, image tuning (brightness/contrast/flip/mirror/IR), video encoding, and system info. Use when asked to move the camera, take a photo/screenshot/snapshot, adjust camera image settings, or query camera status.
+description: Control an SSAU IP camera (hi3510 CGI API). Use when asked to: move/pan/tilt/zoom the camera, take a photo or snapshot, adjust brightness/contrast/flip/mirror/IR, check for motion, or query camera status. All tools output JSON. Connection settings are in scripts/camera_config.ini.
+tags: [camera, iot, vision, hardware]
 ---
 
 Control the SSAU IP camera via CGI HTTP API. Config is read from `camera_config.ini` next to this skill.
 
+## Usage notes
+
+- Camera IP / credentials → edit `skills/camera-control/scripts/camera_config.ini`
+- All tools return `{"ok": true, "result": ...}` on success or `{"ok": false, "error": "..."}` on failure
+- PTZ stop: call `camera_ptz` with act=stop before issuing a new direction
+- Motion alarm: first call to `camera_alarm` records a baseline (triggered=false); subsequent calls return triggered=true only when a new alarm has fired
+- `camera_image_set` flags example: `--brightness 60 --contrast 50 --flip on --mirror off`
+- IR modes: auto (sensor-driven), open (always on), close (always off)
+
 ## Available scripts
 
 - **`scripts/camera.py`** — Full camera control CLI. Always run with `--help` to see current options.
+
+## Tools
+
+| Tool | Description |
+|---|---|
+| `camera_info` | Get camera system info: model, firmware version, uptime, SD card status. |
+| `camera_snap` | Capture a JPEG snapshot and save to disk. |
+| `camera_ptz` | Pan, tilt, or zoom. Actions: up, down, left, right, home, stop, zoomin, zoomout, focusin, focusout, hscan, vscan. |
+| `camera_preset` | Save current PTZ position as a numbered preset, or move to a saved preset. |
+| `camera_image_get` | Read current image settings: brightness, contrast, saturation, sharpness, hue, flip, mirror, noise, AE mode. |
+| `camera_image_set` | Adjust image parameters. Pass only the flags you want to change. |
+| `camera_ir_get` | Read the current IR / night-vision mode. |
+| `camera_ir_set` | Set the IR / night-vision mode (auto / open / close). |
+| `camera_alarm` | Check whether motion has been detected since the last call. |
+| `camera_check` | Full health check of all camera functions. Returns per-check pass/fail. Safe to call at any time. |
+| `camera_panorama` | 4-position panoramic sweep (left → right → home → up → home). Saves one photo per position. |
 
 ## Workflow
 
@@ -113,6 +139,20 @@ venv/bin/python3 scripts/camera.py info
 # Video mode and encoding params
 venv/bin/python3 scripts/camera.py video --get
 venv/bin/python3 scripts/camera.py venc --channel 11|12|13
+```
+
+### Health check
+
+```bash
+# Full check: network, info, PTZ (4 directions), snapshot, image settings, IR, alarm
+venv/bin/python3 scripts/camera.py check
+```
+
+### Panoramic sweep
+
+```bash
+# 4-position sweep: left → right → home → up → home, one photo per position
+venv/bin/python3 scripts/camera.py panorama --output-dir /tmp/panorama
 ```
 
 ## Output format
