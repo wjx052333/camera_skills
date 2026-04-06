@@ -13,7 +13,7 @@ RUN apt-get update \
 # Shell commands run with CWD = workspace_dir (see src/tools/skill_tool.rs)
 # so SKILL.toml command "uv run skills/camera-control/scripts/camera.py ..."
 # resolves correctly from /zeroclaw-data/workspace
-COPY --chown=65534:65534 camera-control /zeroclaw-data/workspace/skills/camera-control
+COPY --chown=65534:65534 ../camera-control /zeroclaw-data/workspace/skills/camera-control
 
 # SOUL.md — loaded by zeroclaw personality system from workspace root
 # (see src/agent/personality.rs: PERSONALITY_FILES includes "SOUL.md")
